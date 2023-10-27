@@ -77,18 +77,19 @@ void CFootBotDiffusion::ControlStep() {
       CRadians cAngle = cAccumulator.Angle();
       if (cAngle.GetValue() > 0.0f) {
          /* Turn left */
-         m_pcWheels->SetLinearVelocity(m_fWheelVelocity, 0.0f);
+         m_pcWheels->SetLinearVelocity(m_fEscapeSpeed, 0.0f);
       }
       else {
          /* Turn right */
-         m_pcWheels->SetLinearVelocity(0.0f, m_fWheelVelocity);
+         m_pcWheels->SetLinearVelocity(0.0f, m_fEscapeSpeed);
       }
    }
    else {
       /* No obstacle detected, go straight */
-      m_pcWheels->SetLinearVelocity(m_fWheelVelocity, m_fWheelVelocity);
+      m_pcWheels->SetLinearVelocity(m_fNormalSpeed, m_fNormalSpeed);
    }
 }
+
 /****************************************/
 /****************************************/
 
