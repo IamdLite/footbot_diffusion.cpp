@@ -1,5 +1,5 @@
 /* Include the controller definition */
-#include "footbot_vfh.h"
+#include "footbot_diffusion.h"
 /* Function definitions for XML parsing */
 #include <argos3/core/utility/configuration/argos_configuration.h>
 /* 2D vector definition */
@@ -8,7 +8,7 @@
 /****************************************/
 /****************************************/
 
-CFootBotVFH::CFootBotVFH() :
+CFootBotDiffusion::CFootBotDiffusion() :
    m_pcWheels(NULL),
    m_pcProximity(NULL),
    m_cAlpha(10.0f),
@@ -20,14 +20,37 @@ CFootBotVFH::CFootBotVFH() :
 /****************************************/
 /****************************************/
 
-void CFootBotVFH::Init(TConfigurationNode& t_node) {
+void CFootBotDiffusion::Init(TConfigurationNode& t_node) {
    /*
     * Get sensor/actuator handles
+    *
+    * The passed string (ex. "differential_steering") corresponds to the
+    * XML tag of the device whose handle we want to have. For a list of
+    * allowed values, type at the command prompt:
+    *
+    * $ argos3 -q actuators
+    *
+    * to have a list of all the possible actuators, or
+    *
+    * $ argos3 -q sensors
+    *
+    * to have a list of all the possible sensors.
+    *
+    * NOTE: ARGoS creates and initializes actuators and sensors
+    * internally, on the basis of the lists provided the configuration
+    * file at the <controllers><footbot_diffusion><actuators> and
+    * <controllers><footbot_diffusion><sensors> sections. If you forgot to
+    * list a device in the XML and then you request it here, an error
+    * occurs.
     */
    m_pcWheels    = GetActuator<CCI_DifferentialSteeringActuator>("differential_steering");
-   m_pcProximity = GetSensor<CCI_FootBotProximitySensor>("footbot_proximity");
+   m_pcProximity = GetSensor  <CCI_FootBotProximitySensor      >("footbot_proximity"    );
    /*
     * Parse the configuration file
+    *
+    * The user defines this part. Here, the algorithm accepts three
+    * parameters and it's nice to put them in the config file so we don't
+    * have to recompile if we want to try other settings.
     */
    GetNodeAttributeOrDefault(t_node, "alpha", m_cAlpha, m_cAlpha);
    m_cGoStraightAngleRange.Set(-ToRadians(m_cAlpha), ToRadians(m_cAlpha));
@@ -38,36 +61,46 @@ void CFootBotVFH::Init(TConfigurationNode& t_node) {
 /****************************************/
 /****************************************/
 
-void CFootBotVFH::ControlStep() {
+void CFootBotDiffusion::ControlStep() {
    /* Get readings from proximity sensor */
    const CCI_FootBotProximitySensor::TReadings& tProxReads = m_pcProximity->GetReadings();
-   /* Calculate the VFH histogram */
-   std::vector<Real> vecHistogram(tProxReads.size(), 0.0f);
+   /* Sum them together */
+   CVector2 cAccumulator;
    for(size_t i = 0; i < tProxReads.size(); ++i) {
-      if (tProxReads[i].Value > m_fDelta) {
-         CRadians cAngle = tProxReads[i].Angle;
-         size_t unBin = static_cast<size_t>((cAngle - m_cGoStraightAngleRange.GetMin()).GetValue() /
-                                             (m_cGoStraightAngleRange.GetSpan().GetValue() / tProxReads.size()));
-         vecHistogram[unBin] += tProxReads[i].Value;
+      cAccumulator += CVector2(tProxReads[i].Value, tProxReads[i].Angle);
+   }
+   cAccumulator /= tProxReads.size();
+   
+   /* Check if an obstacle is detected */
+   if (cAccumulator.Length() > m_fDelta) {
+      /* Calculate the avoidance direction */
+      CRadians cAngle = cAccumulator.Angle();
+      if (cAngle.GetValue() > 0.0f) {
+         /* Turn left */
+         m_pcWheels->SetLinearVelocity(m_fWheelVelocity, 0.0f);
+      }
+      else {
+         /* Turn right */
+         m_pcWheels->SetLinearVelocity(0.0f, m_fWheelVelocity);
       }
    }
-   /* Find the direction with the least obstacle density */
-   size_t unBestBin = 0;
-   Real fMinDensity = vecHistogram[0];
-   for(size_t i = 1; i < vecHistogram.size(); ++i) {
-      if (vecHistogram[i] < fMinDensity) {
-         fMinDensity = vecHistogram[i];
-         unBestBin = i;
-      }
+   else {
+      /* No obstacle detected, go straight */
+      m_pcWheels->SetLinearVelocity(m_fWheelVelocity, m_fWheelVelocity);
    }
-   /* Calculate the direction to move */
-   CRadians cNewDirection = m_cGoStraightAngleRange.GetMin() +
-                           (CRadians(unBestBin) * (m_cGoStraightAngleRange.GetSpan() / tProxReads.size()));
-   /* Set the wheel speeds based on the new direction */
-   m_pcWheels->SetLinearVelocity(m_fWheelVelocity, cNewDirection);
 }
 
 /****************************************/
 /****************************************/
 
-REGISTER_CONTROLLER(CFootBotVFH, "footbot_vfh_controller")
+/*
+ * This statement notifies ARGoS of the existence of the controller.
+ * It binds the class passed as first argument to the string passed as
+ * second argument.
+ * The string is then usable in the configuration file to refer to this
+ * controller.
+ * When ARGoS reads that string in the configuration file, it knows which
+ * controller class to instantiate.
+ * See also the configuration files for an example of how this is used.
+ */
+REGISTER_CONTROLLER(CFootBotDiffusion, "footbot_diffusion_controller")
